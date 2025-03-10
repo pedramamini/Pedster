@@ -1,0 +1,38 @@
+# Pedster Configuration Example
+# Copy this file to ~/.config/pedster/config.toml or use --config flag
+
+[api]
+openrouter_key = ""  # Your OpenRouter API key
+
+[obsidian]
+vault_path = "/path/to/your/obsidian/vault"  # Path to your Obsidian vault
+default_folder = "Pedster"  # Default folder within vault
+tags = ["pedster", "ai"]  # Default tags for notes
+
+[rss]
+feed_urls = [
+    "https://news.ycombinator.com/rss",
+    "https://www.theverge.com/rss/index.xml"
+]
+max_entries_per_feed = 5  # Maximum number of entries to process per feed
+
+[imessage]
+recipients = ["12345678901", "user@example.com"]  # List of phone numbers or emails for sending
+trigger_word = "pedster"  # Word that triggers processing
+lookback_hours = 24  # How far back to look for messages
+
+[ollama]
+api_base = "http://localhost:11434/api"  # Ollama API base URL
+models = ["deepseek-r1:32b"]  # Models to use with Ollama
+
+[web]
+urls = [
+    "https://example.com/article1",
+    "https://example.com/article2"
+]
+jina_api_key = ""  # Your Jina API key (if applicable)
+
+[llm]
+default_model = "gpt4o"  # Default model to use
+default_temperature = 0.7  # Default temperature
+default_max_tokens = 1000  # Default max tokens
