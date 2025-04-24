@@ -23,6 +23,12 @@ dependencies = [
     "requests",
     "whisper",
     "markdown",
+    "sqlalchemy",
+    "python-dateutil",
+    "torch",
+    "numpy",
+    "sentence-transformers",
+    "tqdm",
 ]
 
 [project.optional-dependencies]

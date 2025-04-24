@@ -14,12 +14,38 @@ feed_urls = [
     "https://news.ycombinator.com/rss",
     "https://www.theverge.com/rss/index.xml"
 ]
-max_entries_per_feed = 5  # Maximum number of entries to process per feed
+max_articles_per_feed = 5  # Maximum number of articles to process per feed
+lookback_days = 7  # Number of days to look back for new articles
+db_path = "~/pedster_data/rss.db"  # Path to SQLite database
+jina_enhance_content = true  # Whether to use Jina to enhance truncated content
+
+[podcast]
+feed_urls = [
+    "https://example.com/podcast/feed.xml"
+]
+lookback_days = 7  # Number of days to look back for new episodes
+db_path = "~/pedster_data/podcasts.db"  # Path to SQLite database
+download_audio = true  # Whether to download audio files
+transcribe_audio = true  # Whether to transcribe audio files
+whisper_model = "base"  # Whisper model size (tiny, base, small, medium, large)
+whisper_language = null  # Optional language code (leave as null for auto-detection)
+whisper_cpu_only = true  # Whether to use CPU only for transcription
+whisper_threads = 4  # Number of CPU threads for transcription
+
+[transcription]
+correct_with_domain_expertise = true  # Whether to correct transcripts using domain expertise
+openrouter_model = "anthropic/claude-3-5-sonnet"  # Model to use for domain detection & correction
+topic_sample_size = 4000  # Number of characters to sample for topic detection
 
 [imessage]
 recipients = ["12345678901", "user@example.com"]  # List of phone numbers or emails for sending
-trigger_word = "pedster"  # Word that triggers processing
+trigger_word = "pedster"  # Word that triggers processing (set to null to process all messages)
 lookback_hours = 24  # How far back to look for messages
+db_path = "~/pedster_data/imessage.db"  # Path to SQLite database
+imessage_db_path = "~/Library/Messages/chat.db"  # Path to iMessage database
+include_from_me = true  # Whether to include messages sent by you
+include_group_chats = true  # Whether to include messages from group chats
+include_unknown_senders = true  # Whether to include messages from unknown senders
 
 [ollama]
 api_base = "http://localhost:11434/api"  # Ollama API base URL

@@ -7,6 +7,7 @@ from dagster import AssetIn, AssetKey, asset
 from pedster.ingestors.cli_ingestor import CLIIngestor
 from pedster.ingestors.imessage_ingestor import IMessageIngestor
 from pedster.ingestors.rss_ingestor import RSSIngestor
+from pedster.ingestors.podcast_ingestor import PodcastIngestor
 from pedster.ingestors.web_ingestor import WebIngestor
 from pedster.outputs.imessage_output import IMessageOutput
 from pedster.outputs.obsidian_output import ObsidianOutput
@@ -75,7 +76,26 @@ def rss_ingestor(feed_urls: List[str]) -> RSSIngestor:
         content_type=ContentType.TEXT,
         config={
             "feed_urls": feed_urls,
-            "max_entries_per_feed": 5,
+            "max_articles_per_feed": 5,
+            "jina_enhance_content": True,
+        },
+    )
+
+
+@asset(group="ingestors")
+def podcast_ingestor(feed_urls: List[str]) -> PodcastIngestor:
+    """Podcast ingestor asset factory."""
+    return PodcastIngestor(
+        name="podcast",
+        description="Podcast feed ingestor",
+        source_name="podcast",
+        content_type=ContentType.AUDIO,
+        config={
+            "feed_urls": feed_urls,
+            "lookback_days": 7,
+            "download_audio": True,
+            "transcribe_audio": True,
+            "whisper_model": "base",
         },
     )
 
@@ -96,17 +116,21 @@ def web_ingestor(urls: List[str]) -> WebIngestor:
 
 
 # Processor assets
-@asset(group="processors")
-def transcription_processor() -> TranscriptionProcessor:
+@asset(group="processors", required_resource_keys={"openrouter"})
+def transcription_processor(openrouter: OpenRouterResource) -> TranscriptionProcessor:
     """Transcription processor asset factory."""
     return TranscriptionProcessor(
         name="transcription",
-        description="Audio transcription processor",
+        description="Audio transcription processor with domain expertise correction",
         input_type=ContentType.AUDIO,
         output_type=ContentType.TEXT,
         config={
             "model_size": "base",
             "output_format": "markdown",
+            "correct_with_domain_expertise": True,
+            "openrouter_api_key": openrouter.api_key,
+            "openrouter_model": "anthropic/claude-3-5-sonnet",
+            "topic_sample_size": 4000,
         },
     )
 
@@ -277,4 +301,62 @@ def models_to_obsidian(
     for result in model_results:
         output_result = obsidian_output.output(result)
         results.append(output_result)
+    return results
+
+
+@asset(
+    ins={"podcast_data": AssetIn("podcast_data")},
+    group="data",
+)
+def podcast_to_transcript(
+    podcast_data: List[PipelineData], transcription_processor: TranscriptionProcessor
+) -> List[ProcessorResult]:
+    """Process podcast data with transcription processor."""
+    results = []
+    for data in podcast_data:
+        # Only process untranscribed audio
+        if data.content_type == ContentType.AUDIO:
+            result = transcription_processor.process(data)
+            results.append(result)
+        else:
+            # For data that already has a transcript, just pass it through
+            result = ProcessorResult(data=data, success=True)
+            results.append(result)
+    return results
+
+
+@asset(
+    ins={"transcripts": AssetIn("podcast_to_transcript")},
+    group="data",
+)
+def transcripts_to_summary(
+    transcripts: List[ProcessorResult], claude_processor: Claude37Processor
+) -> List[ProcessorResult]:
+    """Process podcast transcripts with Claude to generate summaries."""
+    results = []
+    for result in transcripts:
+        if result.success:
+            summary_result = claude_processor.process(result.data)
+            results.append(summary_result)
+        else:
+            # Pass through failed results
+            results.append(result)
+    return results
+
+
+@asset(
+    ins={"summaries": AssetIn("transcripts_to_summary")},
+    group="data",
+)
+def podcast_to_obsidian(
+    summaries: List[ProcessorResult], obsidian_output: ObsidianOutput
+) -> List[bool]:
+    """Output podcast summaries to Obsidian."""
+    results = []
+    for result in summaries:
+        if result.success:
+            output_result = obsidian_output.output(result)
+            results.append(output_result)
+        else:
+            results.append(False)
     return results

@@ -32,6 +32,7 @@ all_assets = [
     assets.cli_ingestor,
     assets.imessage_ingestor,
     assets.rss_ingestor,
+    assets.podcast_ingestor,
     assets.web_ingestor,
     
     # Processors
@@ -51,6 +52,9 @@ all_assets = [
     assets.model_to_obsidian,
     assets.rss_to_models,
     assets.models_to_obsidian,
+    assets.podcast_to_transcript,
+    assets.transcripts_to_summary,
+    assets.podcast_to_obsidian,
 ]
 
 # Define jobs
@@ -86,6 +90,33 @@ rss_job = define_asset_job(
     },
 )
 
+# Define podcast job
+podcast_job = define_asset_job(
+    name="podcast_to_obsidian",
+    selection=[
+        "podcast_ingestor", 
+        "podcast_data", 
+        "podcast_to_transcript", 
+        "transcripts_to_summary",
+        "podcast_to_obsidian"
+    ],
+    config={
+        "resources": {
+            "openrouter": {"config": {"api_key": {"env": "OPENROUTER_API_KEY"}}},
+            "obsidian": {"config": {"vault_path": "/Users/pedram/Documents/Obsidian/Main Vault"}},
+        },
+        "ops": {
+            "podcast_ingestor": {
+                "config": {
+                    "feed_urls": [
+                        # Add your podcast feed URLs here
+                    ]
+                }
+            }
+        }
+    },
+)
+
 # Define schedules
 rss_schedule = ScheduleDefinition(
     name="hourly_rss_update",
@@ -102,10 +133,16 @@ imessage_schedule = ScheduleDefinition(
     cron_schedule="*/10 * * * *",  # Run every 10 minutes
 )
 
+podcast_schedule = ScheduleDefinition(
+    name="daily_podcast_update",
+    job=podcast_job,
+    cron_schedule="0 8 * * *",  # Run every day at 8am
+)
+
 # Define Dagster definitions
 defs = Definitions(
     assets=all_assets,
     resources=resources,
-    jobs=[cli_job, rss_job],
-    schedules=[rss_schedule, imessage_schedule],
+    jobs=[cli_job, rss_job, podcast_job],
+    schedules=[rss_schedule, imessage_schedule, podcast_schedule],
 )

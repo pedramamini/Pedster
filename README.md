@@ -1,6 +1,6 @@
 # Pedster
 
-A modular data processing pipeline built with Dagster, designed to ingest, process, and output data from various sources.
+A modular data processing pipeline built with Dagster, designed to ingest, process, and output data from various sources. Each component is self-contained and can be easily extended or modified. IO from various components can be mapped to one another to create custom pipelines. Each component is also accessible via CLI.
 
 ## Features
 
@@ -176,7 +176,7 @@ class MyIngestor(BaseIngestor):
     def ingest(self) -> List[PipelineData]:
         # Fetch data from somewhere
         data = fetch_my_data()
-        
+
         # Return as pipeline data
         return [self.create_pipeline_data(data)]
 ```
@@ -193,7 +193,7 @@ class MyProcessor(BaseProcessor):
     def process(self, data: PipelineData) -> ProcessorResult:
         # Process the data
         processed = transform_data(data.content)
-        
+
         # Return result
         return self.create_result(data, content=processed)
 ```
@@ -211,10 +211,10 @@ class MyOutput(BaseOutput):
         # Extract content
         if isinstance(data, ProcessorResult):
             data = data.data
-        
+
         # Send data somewhere
         success = send_my_data(data.content)
-        
+
         return success
 ```
 

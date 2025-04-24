@@ -1,7 +1,9 @@
-"""Audio transcription processor using Whisper."""
+"""Audio transcription processor using Whisper with domain expertise correction."""
 
 import os
-from typing import Any, Dict, List, Optional
+import json
+import requests
+from typing import Any, Dict, List, Optional, Tuple
 
 from dagster import Config, get_dagster_logger
 
@@ -26,6 +28,10 @@ class TranscriptionConfig(Config):
     patience: float = 1.0
     use_timestamps: bool = True
     output_format: str = "markdown"  # text, json, markdown
+    correct_with_domain_expertise: bool = True  # Correct transcripts using domain expertise
+    openrouter_api_key: Optional[str] = None  # OpenRouter API key for domain detection & correction
+    openrouter_model: str = "anthropic/claude-3-5-sonnet"  # Model to use for domain detection & correction
+    topic_sample_size: int = 4000  # Number of characters to sample for topic detection
 
 
 class TranscriptionProcessor(BaseProcessor):
@@ -149,6 +155,139 @@ class TranscriptionProcessor(BaseProcessor):
         return result["text"]
     
     @track_metrics
+    def _detect_domain(self, title: str, transcript_sample: str) -> str:
+        """Detect the domain expertise needed for this transcript.
+        
+        Args:
+            title: The title of the content
+            transcript_sample: Sample text from the transcript
+            
+        Returns:
+            Domain expertise string (e.g., "Finance", "Machine Learning", etc.)
+        """
+        if not self.config_obj.openrouter_api_key:
+            logger.warning("No OpenRouter API key provided for domain detection")
+            return "General"
+            
+        logger.info("Detecting domain expertise for transcript correction")
+        
+        # Prepare prompt for domain detection
+        prompt = f"""Given the following podcast title and transcript sample, determine the specific professional or technical domain this content belongs to. Focus on identifying specialized fields that might have unique terminology (e.g., Brazilian Jiu-Jitsu, Quantum Physics, Constitutional Law, etc.).
+
+Title: {title}
+
+Transcript Sample:
+{transcript_sample}
+
+Respond with just the domain name, nothing else."""
+
+        # Call OpenRouter API
+        headers = {
+            "Authorization": f"Bearer {self.config_obj.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/pedster/pedster",
+        }
+        
+        try:
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": self.config_obj.openrouter_model,
+                    "messages": [{
+                        "role": "user",
+                        "content": prompt
+                    }]
+                }
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            
+            domain = response_data["choices"][0]["message"]["content"].strip()
+            logger.info(f"Detected domain expertise: {domain}")
+            return domain
+            
+        except Exception as e:
+            logger.error(f"Error detecting domain: {str(e)}")
+            return "General"
+    
+    @track_metrics
+    def _correct_transcript(self, transcript: str, domain: str) -> Tuple[str, Dict[str, Any]]:
+        """Correct the transcript using domain-specific expertise.
+        
+        Args:
+            transcript: The raw transcript from Whisper
+            domain: The detected domain expertise
+            
+        Returns:
+            Tuple of (corrected transcript, correction metadata)
+        """
+        if not self.config_obj.openrouter_api_key:
+            logger.warning("No OpenRouter API key provided for transcript correction")
+            return transcript, {"corrections": "No corrections made - missing API key"}
+            
+        logger.info(f"Correcting transcript with domain expertise: {domain}")
+        
+        # Prepare prompt for domain-specific correction
+        prompt = f"""You are a professional transcriptionist with extensive expertise in {domain}. Your task is to correct any technical terms, jargon, or domain-specific language in this transcript that might have been misinterpreted during speech-to-text conversion.
+
+Focus on:
+1. Technical terminology specific to {domain}
+2. Names of key figures or concepts in the field
+3. Specialized vocabulary and acronyms
+4. Common terms that might have been confused with domain-specific ones
+
+Transcript:
+{transcript}
+
+Provide your response in the following format:
+
+CORRECTED TRANSCRIPT:
+[Your corrected transcript here, maintaining all original formatting and structure]
+
+CHANGES MADE:
+- List each significant correction you made
+- Include the original text and what you changed it to
+- If no changes were needed, state that"""
+
+        # Call OpenRouter API
+        headers = {
+            "Authorization": f"Bearer {self.config_obj.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/pedster/pedster",
+        }
+        
+        try:
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": self.config_obj.openrouter_model,
+                    "messages": [{
+                        "role": "user",
+                        "content": prompt
+                    }]
+                }
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            
+            content = response_data["choices"][0]["message"]["content"].strip()
+            
+            # Parse response
+            parts = content.split("\nCHANGES MADE:")
+            if len(parts) == 2:
+                corrected_transcript = parts[0].replace("CORRECTED TRANSCRIPT:\n", "").strip()
+                changes = parts[1].strip()
+                logger.info(f"Transcript corrected with changes: {changes[:200]}...")
+                return corrected_transcript, {"domain": domain, "corrections": changes}
+            else:
+                logger.warning("Unexpected format in transcript correction response")
+                return transcript, {"domain": domain, "corrections": "Error in correction format"}
+            
+        except Exception as e:
+            logger.error(f"Error correcting transcript: {str(e)}")
+            return transcript, {"domain": domain, "corrections": f"Error: {str(e)}"}
+    
+    @track_metrics
     def process(self, data: PipelineData) -> ProcessorResult:
         """Process audio data for transcription.
         
@@ -174,7 +313,31 @@ class TranscriptionProcessor(BaseProcessor):
             audio_path = data.content
             logger.info(f"Transcribing audio file: {audio_path}")
             
+            # Get title from metadata if available
+            title = data.metadata.get("title", "Untitled Content")
+            
+            # Perform base transcription with Whisper
             result = self._transcribe_audio(audio_path)
+            raw_transcript = result["text"]
+            
+            # Correction process
+            if (self.config_obj.correct_with_domain_expertise and 
+                self.config_obj.openrouter_api_key and 
+                raw_transcript):
+                
+                # Take a sample for domain detection (to save tokens)
+                sample_size = min(len(raw_transcript), self.config_obj.topic_sample_size)
+                transcript_sample = raw_transcript[:sample_size]
+                
+                # Detect domain and correct transcript
+                domain = self._detect_domain(title, transcript_sample)
+                corrected_transcript, correction_metadata = self._correct_transcript(raw_transcript, domain)
+                
+                # Use the corrected transcript
+                result["text"] = corrected_transcript
+                corrections_info = correction_metadata
+            else:
+                corrections_info = {"corrections": "No domain correction applied"}
             
             # Format output
             transcription = self._format_output(result)
@@ -185,6 +348,7 @@ class TranscriptionProcessor(BaseProcessor):
                 "language": result.get("language"),
                 "duration": result.get("duration"),
                 "segments": len(result.get("segments", [])),
+                **corrections_info,
             }
             
             # Update metadata in a copy of the data
