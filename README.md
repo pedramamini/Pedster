@@ -1,4 +1,5 @@
 # Pedster
+**Note: This repository is not functional, it's a work in progress.**
 
 A modular data processing pipeline built with Dagster, designed to ingest, process, and output data from various sources. Each component is self-contained and can be easily extended or modified. IO from various components can be mapped to one another to create custom pipelines. Each component is also accessible via CLI.
 
